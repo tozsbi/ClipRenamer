@@ -1,71 +1,59 @@
 # ClipRenamer
 
-**فكرة ومشروع: toz**
+**An idea and project by toz**
 
-> ⚠️ **نسخة مبدئية (Beta).** الفكرة شغّالة، بس للحين في بدايتها.
-> التسمية بالذكاء الاصطناعي **تشتغل كويس لو عندك مفتاح Claude (API)**.
-> أما الذكاء المجاني اللي يشتغل على جهازك، فيعرف اللعبة صح، لكن وصفه للمقطع **مو أحسن شي**.
+> ⚠️ **Early version (beta).** The idea works, but it's still at an early stage.
+> AI naming **works well if you have a Claude API key**.
+> The free on-device AI gets the game right, but its descriptions of what happened in the clip are **not the best yet**.
 
-برنامج لويندوز يرتّب مقاطع OBS لحاله:
+A Windows app that organizes your OBS clips for you:
 
-- **ينقل المقاطع** من مجلد OBS لأي مجلد تختاره، مثل iCloud Drive، فترتفع للسحابة.
-- **يسمّي المقاطع بالذكاء الاصطناعي** على اللي صار فيها. يشوف صور المقطع ويسمع الفويس، فبدل `Replay 2026-09-07 14-57-40.mp4` يصير الاسم مثلاً `ميمك بارتي - تقليد زورو Open Na Door - 2026-09-07 14-57-40.mp4`.
-- **يفصل المسمّى عن غير المسمّى:** المقاطع اللي تسمّت تروح لمجلد لحالها.
-- **زر تشغيل وزر حذف** جنب كل مقطع.
+- **Moves clips automatically** from your OBS folder to any folder you choose, such as iCloud Drive, so they upload to the cloud.
+- **Names clips with AI** based on what happened in them. It looks at frames from the clip and listens to the voice chat, so `Replay 2026-09-07 14-57-40.mp4` becomes something like `Mimic Party - Zoro Open Na Door impression - 2026-09-07 14-57-40.mp4`.
+- **Keeps named and unnamed clips apart:** named clips go to their own folder.
+- **Play and delete buttons** next to every clip.
 
 ![ClipRenamer](docs/screenshot.png)
 
-## المميزات
+## Features
 
 | | |
 |---|---|
-| 🔁 نقل تلقائي | يشتغل عند فتح الجهاز وكل 10 دقايق، حتى لو البرنامج مقفل |
-| 🛡️ آمن | ما يكتب فوق أي ملف، وما يلمس المقطع اللي OBS لسا يسجّله |
-| ✨ تسمية بالذكاء الاصطناعي | Claude (أدق، بفلوس) أو Ollama (مجاني على جهازك) |
-| 🎙️ يفهم الفويس | يحوّل الكلام لكتابة على جهازك (whisper) |
-| 📁 تختار المجلدات | من وين ياخذ، ووين يحط، ووين تروح المقاطع المسمّاة |
-| 🗑️ حذف | لسلة المحذوفات، أو «المحذوفات مؤخراً» في iCloud |
+| 🔁 Auto move | Runs at logon and every 10 minutes, even when the app is closed |
+| 🛡️ Safe | Never overwrites a file, and never touches a clip OBS is still recording |
+| ✨ AI naming | Claude (more accurate, paid) or Ollama (free, runs on your PC) |
+| 🎙️ Understands voice chat | Turns speech into text on your PC with whisper |
+| 📁 Your folders | Choose where clips come from, where they go, and where named clips go |
+| 🗑️ Delete | To the Recycle Bin, or to iCloud's "Recently Deleted" |
 
-## التشغيل
+## Getting started
 
-1. نزّل المشروع (زر **Code** ثم **Download ZIP**) وفكّه في أي مكان.
-2. اضغط مرتين على **`ClipRenamer.vbs`**.
-3. من صفحة **«النقل»** اختر المجلدات، وبعدها اضغط الزر الكبير **«تشغيل»**.
+1. Download the project (**Code** → **Download ZIP**) and unzip it anywhere.
+2. Double-click **`ClipRenamer.vbs`**.
+3. On the **Move** page, pick your folders, then press the big **Start** button.
 
-### التسمية بالذكاء الاصطناعي
+### AI naming
 
-- أول مرة، روح لصفحة **«الذكاء الاصطناعي»** واضغط **«نزّل الأدوات»**. ينزّل ffmpeg وwhisper، تقريباً 1.8 جيجا ومرة وحدة بس.
-- اختر وش يسمّي:
-  - **Claude (موصى فيه):** حط مفتاح API من [console.anthropic.com](https://console.anthropic.com/settings/keys). تقريباً 5 هللات لكل مقطع.
-  - **مجاني على جهازك:** ثبّت [Ollama](https://ollama.com) وشغّل `ollama pull qwen3-vl:8b-instruct`. يحتاج كرت شاشة كويس (8 جيجا أو أكثر).
+- The first time, open the **AI** page and press **Download tools**. This downloads ffmpeg and whisper (about 1.8 GB, one time only).
+- Choose who names your clips:
+  - **Claude (recommended):** paste an API key from [console.anthropic.com](https://console.anthropic.com/settings/keys). Roughly one or two cents per clip.
+  - **Free, on your PC:** install [Ollama](https://ollama.com) and run `ollama pull qwen3-vl:8b-instruct`. Needs a decent graphics card (8 GB VRAM or more).
 
-## المتطلبات
+## Requirements
 
-- Windows 10 أو 11
+- Windows 10 or 11
 - [OBS Studio](https://obsproject.com/)
-- ما يحتاج Python، لأنه مكتوب بـ PowerShell، وهو موجود في ويندوز أصلاً.
+- No Python needed: it's written in PowerShell, which comes with Windows.
 
-## الخصوصية
+## Privacy
 
-- مفتاح Claude ينحفظ **مشفّر** على جهازك بس.
-- الصوت يتحوّل لكتابة **على جهازك**، والصوت نفسه ما يطلع.
-- مع Claude بس: يطلع للإنترنت 6 صور من المقطع والكلام المكتوب. ومع Ollama ما يطلع أي شي.
+- Your Claude key is stored **encrypted**, on your PC only.
+- Speech is turned into text **on your PC**; the audio itself never leaves it.
+- With Claude only: 6 frames from the clip and the speech text are sent to Claude. With Ollama, nothing leaves your PC.
 
----
+## Note
 
-## English
-
-**ClipRenamer** is an idea and project by **toz**.
-
-> ⚠️ **Early version (beta).** AI naming works well with a **Claude API key**. The free on-device option (Ollama) gets the game right, but its descriptions are not great yet.
-
-A Windows app (PowerShell + WPF, no installs) that:
-
-- moves OBS clips to any folder you pick (for example iCloud Drive), at logon and every 10 minutes, never overwriting and never touching a clip that is still recording;
-- names clips with AI from 6 frames plus a local speech-to-text transcript of the voice chat (Claude API, or free local Ollama + Qwen3-VL);
-- keeps named clips in their own folder, with play and delete buttons for each clip.
-
-Start it by double-clicking `ClipRenamer.vbs`. AI naming needs the tools from **Setup-Tools.ps1** (ffmpeg + whisper.cpp, about 1.8 GB).
+The app's interface is in Arabic.
 
 ## License
 
