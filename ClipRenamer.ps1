@@ -11,6 +11,18 @@ public class TozClipRow {
 '@
 }
 
+# Own taskbar identity, so the window groups with the pinned ClipRenamer shortcut instead of PowerShell
+if (-not ('TozAppId' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class TozAppId {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+}
+'@
+}
+[void][TozAppId]::SetCurrentProcessExplicitAppUserModelID('toz.ClipRenamer')
+
 $Root = $PSScriptRoot
 $SettingsFile = Join-Path $Root 'settings.json'
 $LogFile = Join-Path $Root 'log.txt'
@@ -24,6 +36,7 @@ function Get-Settings {
         Dest         = "$env:USERPROFILE\iCloudDrive\Clips"
         RenameFolder = "$env:USERPROFILE\iCloudDrive\Clips"
         NamedFolder  = "$env:USERPROFILE\iCloudDrive\Named Clips"
+        GraceHours   = 24
         ApiKey       = ''
         AutoName     = $false
         Provider     = 'local'
@@ -182,7 +195,6 @@ $xamlText = @'
         <RadioButton x:Name="NavHome" Style="{StaticResource Nav}" Content="Home" IsChecked="True" Height="76"/>
         <RadioButton x:Name="NavMove" Style="{StaticResource Nav}" Content="Move" Height="76"/>
         <RadioButton x:Name="NavRename" Style="{StaticResource Nav}" Content="Rename" Height="76"/>
-        <RadioButton x:Name="NavAi" Style="{StaticResource Nav}" Content="AI" Height="76"/>
       </StackPanel>
     </Grid>
 
@@ -224,7 +236,7 @@ $xamlText = @'
           <Grid>
             <StackPanel VerticalAlignment="Center">
               <TextBlock Text="Your clips, sorted for you" FontSize="34" FontWeight="Bold" Foreground="White"/>
-              <TextBlock Text="Moves your OBS clips to the folder you choose, and names them after what happened in them." FontSize="16" Foreground="#D8C8CA" Margin="0,8,0,30" TextWrapping="Wrap"/>
+              <TextBlock Text="Moves your OBS clips to the folder you choose, so you can give them your own names." FontSize="16" Foreground="#D8C8CA" Margin="0,8,0,30" TextWrapping="Wrap"/>
               <WrapPanel>
                 <Border Background="#33000000" CornerRadius="6" Padding="20,14" Margin="0,0,14,0">
                   <StackPanel>
@@ -295,6 +307,16 @@ $xamlText = @'
           </Border>
           <Border Style="{StaticResource Card}">
             <StackPanel>
+              <TextBlock Text="If you don't name a clip" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,8"/>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Style="{StaticResource Sub}" Text="After" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="GraceBox" Width="60" Background="#120809" Foreground="White" BorderBrush="#4A2429" Padding="6,5" FontSize="14" CaretBrush="White" HorizontalContentAlignment="Center" FlowDirection="LeftToRight"/>
+                <TextBlock Style="{StaticResource Sub}" Text="hours it gets its date as name (like 2026-10-23 00-20-09) and moves to the named clips folder." VerticalAlignment="Center" Margin="8,0,0,0"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
               <TextBlock Text="How it works" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
               <TextBlock Style="{StaticResource Sub}" Text="• Only moves OBS clips (named by date, like Replay 2026-09-07 14-57-40)."/>
               <TextBlock Style="{StaticResource Sub}" Text="• Never overwrites a file. If the name is taken it adds a number like (2)."/>
@@ -306,81 +328,6 @@ $xamlText = @'
             <Button x:Name="BtnMoveNow" Style="{StaticResource BlueBtn}" Content="Move now" Margin="0,0,10,0"/>
             <Button x:Name="BtnOpenDest" Style="{StaticResource Btn}" Content="Open save folder"/>
           </StackPanel>
-        </StackPanel>
-      </ScrollViewer>
-
-      <!-- AI -->
-      <ScrollViewer x:Name="PageAi" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-        <StackPanel>
-          <TextBlock Style="{StaticResource H}" Text="AI"/>
-          <TextBlock Style="{StaticResource Sub}" Text="The app looks at frames from the clip and listens to the voice chat, then the AI names it after what happened." Margin="0,0,0,18"/>
-          <Border x:Name="ToolsCard" Style="{StaticResource Card}" Visibility="Collapsed">
-            <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <StackPanel>
-                <TextBlock Text="⚠ Tools missing" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
-                <TextBlock Style="{StaticResource Sub}" Text="The app needs tools to read video and listen to audio (about 1.8 GB, one time only)."/>
-              </StackPanel>
-              <Button x:Name="BtnSetupTools" Grid.Column="1" Style="{StaticResource BlueBtn}" Content="Download tools" VerticalAlignment="Center"/>
-            </Grid>
-          </Border>
-          <Border Style="{StaticResource Card}">
-            <StackPanel>
-              <TextBlock Text="Who names your clips?" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,10"/>
-              <RadioButton x:Name="RbLocal" GroupName="Provider" Foreground="White" FontSize="15" Margin="0,0,0,4" VerticalContentAlignment="Center">
-                <TextBlock Text="Free AI on your PC (Ollama)" Margin="8,0,0,0"/>
-              </RadioButton>
-              <TextBlock Style="{StaticResource Sub}" Text="Free, and everything stays on your PC. Names are simpler." Margin="26,0,0,12"/>
-              <RadioButton x:Name="RbClaude" GroupName="Provider" Foreground="White" FontSize="15" Margin="0,0,0,4" VerticalContentAlignment="Center">
-                <TextBlock Text="Claude (more accurate, needs credit)" Margin="8,0,0,0"/>
-              </RadioButton>
-              <TextBlock Style="{StaticResource Sub}" Text="Smarter names, understands jokes and slang better. Roughly one or two cents per clip." Margin="26,0,0,0"/>
-              <TextBlock x:Name="LocalStatus" Style="{StaticResource Sub}" Margin="0,12,0,0"/>
-            </StackPanel>
-          </Border>
-          <Border Style="{StaticResource Card}">
-            <StackPanel>
-              <TextBlock Text="Clip name language" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,10"/>
-              <StackPanel Orientation="Horizontal">
-                <RadioButton x:Name="RbLangEn" GroupName="NameLang" Foreground="White" FontSize="15" Margin="0,0,24,0" VerticalContentAlignment="Center">
-                  <TextBlock Text="English" Margin="8,0,0,0"/>
-                </RadioButton>
-                <RadioButton x:Name="RbLangAr" GroupName="NameLang" Foreground="White" FontSize="15" VerticalContentAlignment="Center">
-                  <TextBlock Text="Arabic (Saudi dialect)" Margin="8,0,0,0"/>
-                </RadioButton>
-              </StackPanel>
-            </StackPanel>
-          </Border>
-          <Border x:Name="KeyCard" Style="{StaticResource Card}">
-            <StackPanel>
-              <TextBlock Text="Claude API key" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
-              <TextBlock Style="{StaticResource Sub}" Text="Create an Anthropic account, add credit, then copy your key and paste it here. It is stored encrypted, on your PC only." Margin="0,0,0,10"/>
-              <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <PasswordBox x:Name="KeyBox" Background="#120809" Foreground="White" BorderBrush="#4A2429" Padding="8,7" FontSize="14" CaretBrush="White" FlowDirection="LeftToRight"/>
-                <Button x:Name="BtnSaveKey" Grid.Column="1" Style="{StaticResource BlueBtn}" Content="Save" Margin="10,0,0,0"/>
-                <Button x:Name="BtnGetKey" Grid.Column="2" Style="{StaticResource Btn}" Content="Get a key" Margin="10,0,0,0"/>
-              </Grid>
-              <TextBlock x:Name="KeyStatus" Style="{StaticResource Sub}" Margin="0,10,0,0"/>
-            </StackPanel>
-          </Border>
-          <Border Style="{StaticResource Card}">
-            <StackPanel>
-              <CheckBox x:Name="ChkAutoName" Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalContentAlignment="Center">
-                <TextBlock Text="Name new clips automatically after they move" Margin="8,0,0,0"/>
-              </CheckBox>
-              <TextBlock Style="{StaticResource Sub}" Text="Every new clip the app moves gets named on its own. Auto move needs to be on." Margin="0,8,0,0"/>
-            </StackPanel>
-          </Border>
-          <Border Style="{StaticResource Card}">
-            <StackPanel>
-              <TextBlock Text="How it works" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
-              <TextBlock Style="{StaticResource Sub}" Text="• Takes 6 frames from the clip and turns the voice chat into text on your PC."/>
-              <TextBlock Style="{StaticResource Sub}" Text="• The AI then looks at the frames and the text and picks a name."/>
-              <TextBlock Style="{StaticResource Sub}" Text="• With Claude only: the frames and the text are sent online. The audio itself never leaves your PC."/>
-              <TextBlock Style="{StaticResource Sub}" Text="• Naming one clip takes about 30 seconds to a minute."/>
-            </StackPanel>
-          </Border>
         </StackPanel>
       </ScrollViewer>
 
@@ -434,10 +381,8 @@ $xamlText = @'
           </Grid>
         </Border>
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,14,0,0">
-          <Button x:Name="BtnAiSuggest" Style="{StaticResource BlueBtn}" Content="✨ Suggest names with AI" Margin="0,0,10,0"/>
           <Button x:Name="BtnApply" Style="{StaticResource BlueBtn}" Content="Apply names" Margin="0,0,10,0"/>
           <Button x:Name="BtnReload" Style="{StaticResource Btn}" Content="Refresh list" Margin="0,0,14,0"/>
-          <TextBlock x:Name="AiProgress" Style="{StaticResource Sub}" VerticalAlignment="Center"/>
         </StackPanel>
       </Grid>
     </Grid>
@@ -479,7 +424,7 @@ $XamlArabic = [ordered]@{
     'Content="Rename" Height' = 'Content="التسمية" Height'
     'Content="AI" Height' = 'Content="الذكاء الاصطناعي" Height'
     'Text="Your clips, sorted for you"' = 'Text="مقاطعك مرتّبة لحالها"'
-    'Text="Moves your OBS clips to the folder you choose, and names them after what happened in them."' = 'Text="ينقل مقاطع OBS للمجلد اللي تختاره، ويسمّيها على اللي صار فيها."'
+    'Text="Moves your OBS clips to the folder you choose, so you can give them your own names."' = 'Text="ينقل مقاطع OBS للمجلد اللي تختاره، وتسمّيها أنت باللي تبيه."'
     'Text="clips waiting to move"' = 'Text="مقطع ينتظر النقل"'
     'Text="clips in the save folder"' = 'Text="مقطع في مجلد الحفظ"'
     'Text="Off" FontSize' = 'Text="موقف" FontSize'
@@ -491,6 +436,9 @@ $XamlArabic = [ordered]@{
     'Text="From (your OBS folder)"' = 'Text="من وين؟ (مجلد OBS)"'
     'Text="To (for example iCloud Drive)"' = 'Text="إلى وين؟ (مثلاً iCloud)"'
     'Text="Where named clips go"' = 'Text="المقاطع اللي تسمّت، وين تروح؟"'
+    'Text="If you don''t name a clip"' = 'Text="إذا ما سمّيت المقطع"'
+    'Text="After"' = 'Text="بعد"'
+    'Text="hours it gets its date as name (like 2026-10-23 00-20-09) and moves to the named clips folder."' = 'Text="ساعة، يتسمّى بتاريخه (مثل 2026-10-23 00-20-09) وينتقل لمجلد المقاطع المسمّاة."'
     'Content="Open"' = 'Content="فتح"'
     'Content="Change"' = 'Content="تغيير"'
     'Text="How it works"' = 'Text="كيف يشتغل؟"'
@@ -541,6 +489,8 @@ if ($Arabic) { foreach ($k in $XamlArabic.Keys) { $xamlText = $xamlText.Replace(
 [xml]$xaml = $xamlText
 
 $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+$IconFile = Join-Path $Root 'ClipRenamer.ico'
+if (Test-Path -LiteralPath $IconFile) { $win.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]$IconFile) }
 $ui = @{}
 $xaml.SelectNodes('//*[@*[local-name()="Name"]]') | ForEach-Object {
     $n = $_.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
@@ -580,11 +530,11 @@ function Refresh-Activity {
         foreach ($l in $lines) {
             if ($l -notmatch '^(\S+ \S+)\s+(.*)$') { continue }
             $when = Format-Ago ([datetime]$Matches[1]); $msg = $Matches[2]
+            if ($msg -match '^AI') { continue }  # old lines from the removed AI naming
             if ($msg -match '^Moved: (.+?) -> ') { $o = @{ Icon = '⇪'; Color = '#A3121F'; Title = (L "Moved: $($Matches[1])" "انتقل: $($Matches[1])") } }
             elseif ($msg -match '^Renamed: .+? -> (.+)$') { $o = @{ Icon = '✎'; Color = '#6B1520'; Title = (L "Named: $($Matches[1])" "تسمّى: $($Matches[1])") } }
+            elseif ($msg -match '^Dated: .+? -> (.+)$') { $o = @{ Icon = '📅'; Color = '#4A2429'; Title = (L "Named by date: $($Matches[1])" "تسمّى بتاريخه: $($Matches[1])") } }
             elseif ($msg -match '^Deleted \(.+?\): (.+)$') { $o = @{ Icon = '🗑'; Color = '#4A2429'; Title = (L "Deleted: $($Matches[1])" "انحذف: $($Matches[1])") } }
-            elseif ($msg -match '^AI suggested: .+? -> (.+)$') { $o = @{ Icon = '✨'; Color = '#6B1520'; Title = (L "Suggested: $($Matches[1])" "اقتراح: $($Matches[1])") } }
-            elseif ($msg -match '^AI FAILED: (.+?): ') { $o = @{ Icon = '!'; Color = '#D9534F'; Title = (L "Could not name: $($Matches[1])" "ما قدر يسمّي: $($Matches[1])") } }
             elseif ($msg -match '^Skipped \(in use\): (.+)$') { $o = @{ Icon = '●'; Color = '#E0A030'; Title = (L "Waiting (still recording): $($Matches[1])" "ينتظر (يتسجّل): $($Matches[1])") } }
             else { $o = @{ Icon = '!'; Color = '#D9534F'; Title = $msg } }
             $o.When = $when
@@ -608,63 +558,18 @@ function Refresh-Status {
     $ui.TxtDest.Text = $Settings.Dest
     $ui.TxtRenameFolder.Text = $Settings.RenameFolder
     $ui.TxtNamed.Text = $Settings.NamedFolder
-    $ui.ToolsCard.Visibility = if (Test-Tools) { 'Collapsed' } else { 'Visible' }
-    $ui.KeyStatus.Text = if ($Settings.ApiKey) { (L '✓ A key is saved. Paste a new one and press Save to change it.' '✓ فيه مفتاح محفوظ. تقدر تلصق مفتاح جديد وتضغط «حفظ» لو تبي تغيّره.') } else { (L 'No key saved yet.' 'ما فيه مفتاح محفوظ للحين.') }
     Refresh-Activity
-    Update-AiProgress
-}
-
-function Test-Tools {
-    $t = Join-Path $Root 'tools'
-    (Test-Path (Join-Path $t 'ffmpeg.exe')) -and (Test-Path (Join-Path $t 'ffprobe.exe')) -and
-    (Test-Path (Join-Path $t 'whisper\whisper-cli.exe')) -and (Test-Path (Join-Path $t 'whisper\ggml-large-v3-turbo.bin'))
-}
-
-$AiStatusFile = Join-Path $Root 'ai-status.txt'
-$script:AiRunning = $false
-function Update-AiProgress {
-    if (-not $script:AiRunning) { return }
-    $st = if (Test-Path -LiteralPath $AiStatusFile) { (Get-Content -LiteralPath $AiStatusFile -Raw -Encoding UTF8).Trim() } else { '' }
-    if ($st -match '^run:(\d+)/(\d+)') {
-        $ui.AiProgress.Text = (L "✨ Naming... clip $($Matches[1]) of $($Matches[2])" "✨ يسمّي... مقطع $($Matches[1]) من $($Matches[2])")
-        Load-Suggestions
-    } elseif ($st -match '^done:(\d+)') {
-        $script:AiRunning = $false; $ui.BtnAiSuggest.IsEnabled = $true
-        $ui.AiProgress.Text = (L "✓ Done. $($Matches[1]) names suggested. Check them, then press Apply names." "✓ خلص. اقترح $($Matches[1]) اسم، راجعها واضغط «طبّق الأسماء».")
-        Load-Suggestions
-    } elseif ($st -match '^error:(\w+)') {
-        $script:AiRunning = $false; $ui.BtnAiSuggest.IsEnabled = $true
-        $ui.AiProgress.Text = switch ($Matches[1]) { 'ollama' { (L '⚠ Ollama is not running or not installed.' '⚠ برنامج Ollama مو شغّال أو مو مثبّت.') } 'key' { (L '⚠ No API key. Open the AI page.' '⚠ ما فيه مفتاح. روح لصفحة «الذكاء الاصطناعي».') } 'tools' { (L '⚠ Tools missing. Open the AI page.' '⚠ الأدوات ناقصة. روح لصفحة «الذكاء الاصطناعي».') } default { (L '⚠ Something went wrong. See recent activity.' '⚠ صار خطأ، شوف آخر النشاط.') } }
-    }
-}
-
-# Fill in new suggestions without losing names the user already typed
-function Load-Suggestions {
-    $csv = Join-Path $Root 'names.csv'
-    if (-not (Test-Path -LiteralPath $csv) -or -not $ui.ClipList.ItemsSource) { return }
-    $suggest = @{}
-    Get-Content -LiteralPath $csv -Encoding UTF8 | ConvertFrom-Csv | ForEach-Object { $suggest[$_.Old] = $_.New }
-    $changed = $false
-    foreach ($r in $ui.ClipList.ItemsSource) {
-        if ($r.New -eq $r.Old -and $suggest.ContainsKey($r.Old) -and $suggest[$r.Old] -ne $r.New) { $r.New = $suggest[$r.Old]; $changed = $true }
-    }
-    if ($changed) { $ui.ClipList.Items.Refresh() }
 }
 
 function Load-RenameList {
     $folder = $Settings.RenameFolder
-    $suggest = @{}
-    $csv = Join-Path $Root 'names.csv'
-    if (Test-Path -LiteralPath $csv) {
-        Get-Content -LiteralPath $csv -Encoding UTF8 | ConvertFrom-Csv | ForEach-Object { $suggest[$_.Old] = $_.New }
-    }
     $rows = New-Object System.Collections.ObjectModel.ObservableCollection[TozClipRow]
     if (Test-Path -LiteralPath $folder) {
         Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue |
             Where-Object { $VideoExt -contains $_.Extension.ToLower() } | Sort-Object Name | ForEach-Object {
                 $r = New-Object TozClipRow
                 $r.Old = $_.Name; $r.Path = $_.FullName
-                $r.New = if ($suggest.ContainsKey($_.Name)) { $suggest[$_.Name] } else { $_.Name }
+                $r.New = $_.Name
                 $rows.Add($r)
             }
     }
@@ -677,7 +582,7 @@ function Write-Log($msg) {
 }
 
 function Show-Page($name) {
-    foreach ($p in 'PageHome', 'PageMove', 'PageRename', 'PageAi') { $ui[$p].Visibility = 'Collapsed' }
+    foreach ($p in 'PageHome', 'PageMove', 'PageRename') { $ui[$p].Visibility = 'Collapsed' }
     $ui[$name].Visibility = 'Visible'
     if ($name -eq 'PageRename') { Load-RenameList }
 }
@@ -701,64 +606,7 @@ $ui.BtnClose.Add_Click({ $win.Close() })
 $ui.NavHome.Add_Checked({ Show-Page 'PageHome' })
 $ui.NavMove.Add_Checked({ Show-Page 'PageMove' })
 $ui.NavRename.Add_Checked({ Show-Page 'PageRename' })
-$ui.NavAi.Add_Checked({ Show-Page 'PageAi' })
 
-function Update-ProviderUi {
-    $isClaude = $Settings.Provider -eq 'claude'
-    $ui.KeyCard.Visibility = if ($isClaude) { 'Visible' } else { 'Collapsed' }
-    if ($isClaude) { $ui.LocalStatus.Text = ''; return }
-    $exe = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
-    $ui.LocalStatus.Text = if (-not (Test-Path $exe)) { (L '⚠ Ollama is not installed. Get it from ollama.com' '⚠ برنامج Ollama مو مثبّت. نزّله من ollama.com') }
-        elseif (Test-Path (Join-Path $env:USERPROFILE ".ollama\models\manifests\registry.ollama.ai\library\$($Settings.LocalModel -replace ':', '\')")) { "✓ Free AI is ready ($($Settings.LocalModel))." }
-        else { "⚠ Model $($Settings.LocalModel) is not downloaded. Run: ollama pull $($Settings.LocalModel)" }
-}
-$ui.RbLocal.IsChecked = $Settings.Provider -ne 'claude'
-$ui.RbClaude.IsChecked = $Settings.Provider -eq 'claude'
-$ui.RbLocal.Add_Click({ $Settings.Provider = 'local'; Save-Settings $Settings; Update-ProviderUi })
-$ui.RbClaude.Add_Click({ $Settings.Provider = 'claude'; Save-Settings $Settings; Update-ProviderUi })
-Update-ProviderUi
-
-$ui.RbLangAr.IsChecked = $Settings.NameLanguage -eq 'Arabic'
-$ui.RbLangEn.IsChecked = $Settings.NameLanguage -ne 'Arabic'
-$ui.RbLangEn.Add_Click({ $Settings.NameLanguage = 'English'; Save-Settings $Settings })
-$ui.RbLangAr.Add_Click({ $Settings.NameLanguage = 'Arabic'; Save-Settings $Settings })
-
-$ui.ChkAutoName.IsChecked = [bool]$Settings.AutoName
-$ui.ChkAutoName.Add_Click({ $Settings.AutoName = [bool]$ui.ChkAutoName.IsChecked; Save-Settings $Settings })
-
-$ui.BtnGetKey.Add_Click({ Start-Process 'https://console.anthropic.com/settings/keys' })
-
-$ui.BtnSaveKey.Add_Click({
-    $key = $ui.KeyBox.Password.Trim()
-    if (-not $key) { $ui.KeyStatus.Text = (L 'Paste your key in the box first.' 'الصق المفتاح في الخانة أول.'); return }
-    $ui.KeyStatus.Text = (L 'Checking the key...' 'أتأكد من المفتاح...')
-    $ok = $false
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-RestMethod 'https://api.anthropic.com/v1/models?limit=1' -Headers @{ 'x-api-key' = $key; 'anthropic-version' = '2026-10-21' } -TimeoutSec 20 | Out-Null
-        $ok = $true
-    } catch { }
-    if (-not $ok) { $ui.KeyStatus.Text = (L '✗ The key is wrong or there is no internet. Copy it again from Anthropic.' '✗ المفتاح غلط أو ما فيه إنترنت. انسخه مرة ثانية من موقع Anthropic.'); return }
-    $Settings.ApiKey = ConvertTo-SecureString $key -AsPlainText -Force | ConvertFrom-SecureString
-    Save-Settings $Settings
-    $ui.KeyBox.Clear()
-    Refresh-Status
-    $ui.KeyStatus.Text = (L '✓ Key is valid and saved.' '✓ المفتاح صحيح وانحفظ.')
-})
-
-$ui.BtnSetupTools.Add_Click({
-    Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $Root 'Setup-Tools.ps1')`""
-})
-
-$ui.BtnAiSuggest.Add_Click({
-    if ($Settings.Provider -eq 'claude' -and -not $Settings.ApiKey) { $ui.AiProgress.Text = (L '⚠ No API key. Open the AI page.' '⚠ ما فيه مفتاح. روح لصفحة «الذكاء الاصطناعي».'); return }
-    if (-not (Test-Tools)) { $ui.AiProgress.Text = (L '⚠ Tools missing. Open the AI page.' '⚠ الأدوات ناقصة. روح لصفحة «الذكاء الاصطناعي».'); return }
-    Save-Settings $Settings
-    Set-Content -LiteralPath $AiStatusFile -Value 'run:0/0' -Encoding UTF8
-    $script:AiRunning = $true; $ui.BtnAiSuggest.IsEnabled = $false
-    $ui.AiProgress.Text = (L '✨ Starting...' '✨ يبدأ...')
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $Root 'Name-Clips.ps1')`"", '-Folder', "`"$($Settings.RenameFolder)`"", '-Mode', 'Suggest'
-})
 $ui.BtnGear.Add_Click({ $ui.NavMove.IsChecked = $true })
 
 $ui.BtnPlay.Add_Click({
@@ -786,6 +634,12 @@ $ui.BtnPickNamed.Add_Click({
 $ui.BtnOpenNamed.Add_Click({
     if (-not (Test-Path -LiteralPath $Settings.NamedFolder)) { New-Item -ItemType Directory -Path $Settings.NamedFolder -Force | Out-Null }
     Start-Process explorer.exe -ArgumentList "`"$($Settings.NamedFolder)`""
+})
+$ui.GraceBox.Text = [string]$Settings.GraceHours
+$ui.GraceBox.Add_LostFocus({
+    $h = 0
+    if ([double]::TryParse($ui.GraceBox.Text, [ref]$h) -and $h -ge 0) { $Settings.GraceHours = $h; Save-Settings $Settings }
+    else { $ui.GraceBox.Text = [string]$Settings.GraceHours }
 })
 $ui.BtnPickRename.Add_Click({
     $p = Pick-Folder $Settings.RenameFolder (L 'Choose the folder with clips to rename' 'اختر المجلد اللي تبي تسمّي مقاطعه')

@@ -13,6 +13,9 @@ if (Test-Path -LiteralPath $SettingsFile) {
     if (-not $PSBoundParameters.ContainsKey('Source') -and $cfg.Source) { $Source = $cfg.Source }
     if (-not $PSBoundParameters.ContainsKey('Dest') -and $cfg.Dest) { $Dest = $cfg.Dest }
 }
+$NamedFolder = if ($cfg.NamedFolder) { $cfg.NamedFolder } else { Join-Path $env:USERPROFILE 'iCloudDrive\المقاطع المسمّاة' }
+# Clips the user didn't rename within this many hours get their date as name
+$GraceHours = if ($null -ne $cfg.GraceHours) { [double]$cfg.GraceHours } else { 24 }
 
 $LogFile = Join-Path $PSScriptRoot 'log.txt'
 function Write-Log($msg) {
@@ -59,13 +62,32 @@ foreach ($f in $files) {
     try {
         Move-Item -LiteralPath $f.FullName -Destination $target -ErrorAction Stop
         Write-Log "Moved: $($f.Name) -> $target"
+        # Mark when it arrived, so the rename wait starts now and not at recording time
+        try { (Get-Item -LiteralPath $target).CreationTime = Get-Date } catch { }
         $moved += $target
     } catch {
         Write-Log "FAILED: $($f.Name): $($_.Exception.Message)"
     }
 }
 
-# Name the clips that just arrived, if AI naming is turned on in the app
-if ($moved.Count -and $cfg.AutoName -and ($cfg.Provider -ne 'claude' -or $cfg.ApiKey)) {
-    & (Join-Path $PSScriptRoot 'Name-Clips.ps1') -Files $moved -Mode Apply
+# Clips still unnamed after the wait: name them by their date and move them to the named folder
+$dateCutoff = (Get-Date).AddHours(-$GraceHours)
+$waiting = Get-ChildItem -LiteralPath $Dest -File -ErrorAction SilentlyContinue | Where-Object {
+    $extensions -contains $_.Extension.ToLower() -and $_.BaseName -match $namePattern -and $_.CreationTime -lt $dateCutoff
+}
+foreach ($f in $waiting) {
+    if (-not (Test-Path -LiteralPath $NamedFolder)) { New-Item -ItemType Directory -Path $NamedFolder -Force | Out-Null }
+    $newBase = $f.BaseName -replace '^Replay ', ''
+    $target = Join-Path $NamedFolder ($newBase + $f.Extension)
+    $n = 2
+    while (Test-Path -LiteralPath $target) {
+        $target = Join-Path $NamedFolder ("{0} ({1}){2}" -f $newBase, $n, $f.Extension)
+        $n++
+    }
+    try {
+        Move-Item -LiteralPath $f.FullName -Destination $target -ErrorAction Stop
+        Write-Log "Dated: $($f.Name) -> $(Split-Path $target -Leaf)"
+    } catch {
+        Write-Log "FAILED: $($f.Name): $($_.Exception.Message)"
+    }
 }
