@@ -321,7 +321,7 @@ $xamlText = @'
               <TextBlock Style="{StaticResource Sub}" Text="• Only moves OBS clips (named by date, like Replay 2026-09-07 14-57-40)."/>
               <TextBlock Style="{StaticResource Sub}" Text="• Never overwrites a file. If the name is taken it adds a number like (2)."/>
               <TextBlock Style="{StaticResource Sub}" Text="• Never touches a clip OBS is still recording."/>
-              <TextBlock Style="{StaticResource Sub}" Text="• Once started, it runs at logon and every 10 minutes, even when the app is closed."/>
+              <TextBlock Style="{StaticResource Sub}" Text="• Once started, it runs once every 24 hours, even when the app is closed."/>
             </StackPanel>
           </Border>
           <StackPanel Orientation="Horizontal">
@@ -445,7 +445,7 @@ $XamlArabic = [ordered]@{
     'Text="• Only moves OBS clips (named by date, like Replay 2026-09-07 14-57-40)."' = 'Text="• ينقل بس مقاطع OBS (اللي اسمها تاريخ، مثل Replay 2026-09-07 14-57-40)."'
     'Text="• Never overwrites a file. If the name is taken it adds a number like (2)."' = 'Text="• ما يكتب فوق أي ملف. إذا الاسم موجود يضيف رقم مثل (2)."'
     'Text="• Never touches a clip OBS is still recording."' = 'Text="• ما يلمس المقطع اللي OBS لسا يسجّله."'
-    'Text="• Once started, it runs at logon and every 10 minutes, even when the app is closed."' = 'Text="• إذا شغّلته، يشتغل لحاله عند فتح الجهاز وكل 10 دقايق، حتى لو البرنامج مقفل."'
+    'Text="• Once started, it runs once every 24 hours, even when the app is closed."' = 'Text="• إذا شغّلته، يشتغل لحاله مرة كل 24 ساعة، حتى لو البرنامج مقفل."'
     'Content="Move now"' = 'Content="انقل الحين"'
     'Content="Open save folder"' = 'Content="افتح مجلد الحفظ"'
     'Text="AI"/>' = 'Text="الذكاء الاصطناعي"/>'

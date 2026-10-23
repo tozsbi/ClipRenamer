@@ -17,7 +17,7 @@ The long-term idea is for AI to name the clips by itself. I tried it, but the re
 
 | | |
 |---|---|
-| 🔁 Auto move | Moves OBS clips to the folder you choose, at logon and every 10 minutes, even when the app is closed |
+| 🔁 Auto move | Moves OBS clips to the folder you choose, once every 24 hours, even when the app is closed |
 | ✏️ Rename list | Every clip waiting to be named, with a box to type its new name |
 | 📅 Date fallback | A clip you don't name within the time you choose (24 hours by default) gets its date as name, like `2026-10-23 00-20-09` |
 | 📁 Named clips apart | Named clips go to their own folder, so the list only shows clips still waiting |
