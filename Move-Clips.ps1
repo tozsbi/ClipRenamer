@@ -1,0 +1,71 @@
+﻿# Moves OBS recordings / replay clips from the Videos folder into iCloud Drive\Clips.
+# Never overwrites: if a file with the same name exists, adds " (2)", " (3)", ...
+param(
+    [string]$Source = "$env:USERPROFILE\Videos",
+    [string]$Dest = "$env:USERPROFILE\iCloudDrive\Clips",
+    [int]$MinAgeSeconds = 60
+)
+
+# Folders chosen in the ClipRenamer app override the defaults
+$SettingsFile = Join-Path $PSScriptRoot 'settings.json'
+if (Test-Path -LiteralPath $SettingsFile) {
+    $cfg = Get-Content -LiteralPath $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $PSBoundParameters.ContainsKey('Source') -and $cfg.Source) { $Source = $cfg.Source }
+    if (-not $PSBoundParameters.ContainsKey('Dest') -and $cfg.Dest) { $Dest = $cfg.Dest }
+}
+
+$LogFile = Join-Path $PSScriptRoot 'log.txt'
+function Write-Log($msg) {
+    $line = "{0:yyyy-MM-dd HH:mm:ss}  {1}" -f (Get-Date), $msg
+    Add-Content -LiteralPath $LogFile -Value $line -Encoding UTF8
+}
+
+# Keep the log small
+if ((Test-Path -LiteralPath $LogFile) -and (Get-Item -LiteralPath $LogFile).Length -gt 1MB) {
+    Get-Content -LiteralPath $LogFile -Tail 500 | Set-Content -LiteralPath $LogFile -Encoding UTF8
+}
+
+$destParent = Split-Path $Dest -Parent
+if (-not (Test-Path -LiteralPath $destParent)) {
+    Write-Log "Destination folder not found ($destParent). If it is iCloud Drive, is iCloud for Windows installed and signed in? Nothing moved."
+    exit 1
+}
+if (-not (Test-Path -LiteralPath $Dest)) { New-Item -ItemType Directory -Path $Dest | Out-Null }
+
+# OBS file names: "2026-10-18 16-39-04.mp4", "Replay 2026-10-23 00-20-09.mp4", "... - Trim.mp4"
+$namePattern = '^(Replay )?\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}'
+$extensions = '.mp4', '.mkv', '.mov', '.flv'
+$cutoff = (Get-Date).AddSeconds(-$MinAgeSeconds)
+
+$files = Get-ChildItem -LiteralPath $Source -File -ErrorAction SilentlyContinue | Where-Object {
+    $extensions -contains $_.Extension.ToLower() -and
+    $_.BaseName -match $namePattern -and
+    $_.LastWriteTime -lt $cutoff
+}
+
+$moved = @()
+foreach ($f in $files) {
+    # Skip files OBS is still writing
+    try { $s = [IO.File]::Open($f.FullName, 'Open', 'ReadWrite', 'None'); $s.Close() }
+    catch { Write-Log "Skipped (in use): $($f.Name)"; continue }
+
+    $target = Join-Path $Dest $f.Name
+    $n = 2
+    while (Test-Path -LiteralPath $target) {
+        $target = Join-Path $Dest ("{0} ({1}){2}" -f $f.BaseName, $n, $f.Extension)
+        $n++
+    }
+
+    try {
+        Move-Item -LiteralPath $f.FullName -Destination $target -ErrorAction Stop
+        Write-Log "Moved: $($f.Name) -> $target"
+        $moved += $target
+    } catch {
+        Write-Log "FAILED: $($f.Name): $($_.Exception.Message)"
+    }
+}
+
+# Name the clips that just arrived, if AI naming is turned on in the app
+if ($moved.Count -and $cfg.AutoName -and ($cfg.Provider -ne 'claude' -or $cfg.ApiKey)) {
+    & (Join-Path $PSScriptRoot 'Name-Clips.ps1') -Files $moved -Mode Apply
+}

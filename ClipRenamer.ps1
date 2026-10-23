@@ -1,0 +1,758 @@
+﻿# ClipRenamer app window. Run with: powershell -STA -ExecutionPolicy Bypass -File ClipRenamer.ps1
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+
+if (-not ('TozClipRow' -as [type])) {
+    Add-Type -TypeDefinition @'
+public class TozClipRow {
+    public string Old { get; set; }
+    public string New { get; set; }
+    public string Path { get; set; }
+}
+'@
+}
+
+$Root = $PSScriptRoot
+$SettingsFile = Join-Path $Root 'settings.json'
+$LogFile = Join-Path $Root 'log.txt'
+$TaskName = 'ClipRenamer - auto move'
+$NamePattern = '^(Replay )?\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}'
+$VideoExt = '.mp4', '.mkv', '.mov', '.flv'
+
+function Get-Settings {
+    $s = [ordered]@{
+        Source       = "$env:USERPROFILE\Videos"
+        Dest         = "$env:USERPROFILE\iCloudDrive\Clips"
+        RenameFolder = "$env:USERPROFILE\iCloudDrive\Clips"
+        NamedFolder  = "$env:USERPROFILE\iCloudDrive\المقاطع المسمّاة"
+        ApiKey       = ''
+        AutoName     = $false
+        Provider     = 'local'
+        LocalModel   = 'qwen3-vl:8b-instruct'
+    }
+    if (Test-Path -LiteralPath $SettingsFile) {
+        $saved = Get-Content -LiteralPath $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($k in @($s.Keys)) { if ($saved.$k) { $s[$k] = $saved.$k } }
+    }
+    $s
+}
+function Save-Settings($s) { $s | ConvertTo-Json | Set-Content -LiteralPath $SettingsFile -Encoding UTF8 }
+$Settings = Get-Settings
+
+[xml]$xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ClipRenamer" Width="1180" Height="720" MinWidth="980" MinHeight="600"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize"
+        Background="#120809" FlowDirection="RightToLeft" FontFamily="Segoe UI" Foreground="#E6E8EB">
+  <WindowChrome.WindowChrome>
+    <WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0"/>
+  </WindowChrome.WindowChrome>
+  <Window.Resources>
+    <SolidColorBrush x:Key="Accent" Color="#A3121F"/>
+    <SolidColorBrush x:Key="Muted" Color="#9E8B8E"/>
+    <SolidColorBrush x:Key="Panel" Color="#1E0F11"/>
+    <SolidColorBrush x:Key="Line" Color="#3A1B1F"/>
+
+    <Style TargetType="ScrollBar">
+      <Setter Property="Width" Value="8"/>
+      <Setter Property="MinWidth" Value="8"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollBar">
+            <Track x:Name="PART_Track" IsDirectionReversed="True">
+              <Track.Thumb>
+                <Thumb>
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                      <Border Background="#4A2429" CornerRadius="4" Margin="1,0"/>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+            </Track>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="Nav" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="#B3A3A5"/>
+      <Setter Property="FontSize" Value="17"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="0,0,26,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Grid Background="Transparent">
+              <ContentPresenter VerticalAlignment="Center"/>
+              <Border x:Name="Bar" Height="3" VerticalAlignment="Bottom" Background="#A3121F" Visibility="Hidden" CornerRadius="2"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Foreground" Value="White"/>
+                <Setter TargetName="Bar" Property="Visibility" Value="Visible"/>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="White"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="Btn" TargetType="Button">
+      <Setter Property="Background" Value="#3A1B1F"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Padding" Value="16,8"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Opacity" Value="0.85"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Opacity" Value="0.7"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="B" Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="BlueBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Background" Value="#A3121F"/>
+    </Style>
+    <Style x:Key="Chrome" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="#B3A3A5"/>
+      <Setter Property="Padding" Value="14,4"/>
+      <Setter Property="FontSize" Value="13"/>
+    </Style>
+
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="#1E0F11"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="Padding" Value="22"/>
+      <Setter Property="Margin" Value="0,0,0,14"/>
+    </Style>
+    <Style x:Key="H" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="22"/>
+      <Setter Property="FontWeight" Value="Bold"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Margin" Value="0,0,0,6"/>
+    </Style>
+    <Style x:Key="Sub" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#9E8B8E"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+    <Style x:Key="Path" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Foreground" Value="#E6E8EB"/>
+      <Setter Property="FlowDirection" Value="LeftToRight"/>
+      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="76"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="*"/>
+      <ColumnDefinition Width="300"/>
+    </Grid.ColumnDefinitions>
+
+    <!-- Top bar -->
+    <Grid x:Name="TopBar" Grid.Row="0" Grid.Column="0" Background="#120809" Margin="28,0,12,0">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Border Width="40" Height="40" CornerRadius="20" Background="#A3121F" Margin="0,0,14,0">
+          <TextBlock Text="C" FontSize="22" FontWeight="Black" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-4,0,0"/>
+        </Border>
+        <TextBlock Text="ClipRenamer" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,40,0" FlowDirection="LeftToRight"/>
+        <RadioButton x:Name="NavHome" Style="{StaticResource Nav}" Content="الرئيسية" IsChecked="True" Height="76"/>
+        <RadioButton x:Name="NavMove" Style="{StaticResource Nav}" Content="النقل" Height="76"/>
+        <RadioButton x:Name="NavRename" Style="{StaticResource Nav}" Content="التسمية" Height="76"/>
+        <RadioButton x:Name="NavAi" Style="{StaticResource Nav}" Content="الذكاء الاصطناعي" Height="76"/>
+      </StackPanel>
+    </Grid>
+
+    <!-- Sidebar header + window buttons -->
+    <Grid Grid.Row="0" Grid.Column="1" Background="#170B0D">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Top" HorizontalAlignment="Left" FlowDirection="LeftToRight">
+        <Button x:Name="BtnMin" Style="{StaticResource Chrome}" Content="—"/>
+        <Button x:Name="BtnClose" Style="{StaticResource Chrome}" Content="✕"/>
+      </StackPanel>
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="20,0,20,12">
+        <Border Width="38" Height="38" CornerRadius="19" Background="#3A1B1F" Margin="0,0,10,0">
+          <TextBlock x:Name="UserInitials" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" FlowDirection="LeftToRight"/>
+        </Border>
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock x:Name="UserName" FontSize="15" FontWeight="SemiBold" Foreground="#FF6B6B" FlowDirection="LeftToRight" HorizontalAlignment="Right"/>
+          <TextBlock x:Name="SideStatus" Text="..." FontSize="12" Foreground="#9E8B8E"/>
+        </StackPanel>
+      </StackPanel>
+    </Grid>
+
+    <!-- Main content -->
+    <Grid Grid.Row="1" Grid.Column="0" Margin="28,8,24,24">
+
+      <!-- HOME -->
+      <Grid x:Name="PageHome">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Border Grid.Row="0" CornerRadius="8" Padding="40">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+              <GradientStop Color="#4A0E16" Offset="0"/>
+              <GradientStop Color="#2A0A0F" Offset="0.6"/>
+              <GradientStop Color="#140809" Offset="1"/>
+            </LinearGradientBrush>
+          </Border.Background>
+          <Grid>
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="مقاطعك مرتّبة لحالها" FontSize="34" FontWeight="Bold" Foreground="White"/>
+              <TextBlock Text="ينقل مقاطع OBS للمجلد اللي تختاره، ويسمّيها على اللي صار فيها." FontSize="16" Foreground="#D8C8CA" Margin="0,8,0,30" TextWrapping="Wrap"/>
+              <WrapPanel>
+                <Border Background="#33000000" CornerRadius="6" Padding="20,14" Margin="0,0,14,0">
+                  <StackPanel>
+                    <TextBlock x:Name="CountWaiting" Text="0" FontSize="30" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="مقطع ينتظر النقل" Foreground="#C9B5B8" FontSize="13"/>
+                  </StackPanel>
+                </Border>
+                <Border Background="#33000000" CornerRadius="6" Padding="20,14" Margin="0,0,14,0">
+                  <StackPanel>
+                    <TextBlock x:Name="CountDest" Text="0" FontSize="30" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="مقطع في مجلد الحفظ" Foreground="#C9B5B8" FontSize="13"/>
+                  </StackPanel>
+                </Border>
+                <Border Background="#33000000" CornerRadius="6" Padding="20,14">
+                  <StackPanel>
+                    <TextBlock x:Name="StatusBig" Text="موقف" FontSize="30" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="النقل التلقائي" Foreground="#C9B5B8" FontSize="13"/>
+                  </StackPanel>
+                </Border>
+              </WrapPanel>
+            </StackPanel>
+          </Grid>
+        </Border>
+        <Grid Grid.Row="1" Margin="0,18,0,0">
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+            <Button x:Name="BtnPlay" Style="{StaticResource BlueBtn}" Width="270" Height="58" FontSize="22" FontWeight="Bold" Content="تشغيل"/>
+            <Button x:Name="BtnGear" Style="{StaticResource BlueBtn}" Width="58" Height="58" FontSize="20" Margin="2,0,0,0" Content="⚙" ToolTip="اختيار المجلدات"/>
+          </StackPanel>
+          <TextBlock x:Name="HomeHint" Style="{StaticResource Sub}" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="13"/>
+        </Grid>
+      </Grid>
+
+      <!-- MOVE -->
+      <ScrollViewer x:Name="PageMove" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource H}" Text="النقل"/>
+          <TextBlock Style="{StaticResource Sub}" Text="اختر من وين ياخذ المقاطع، ووين يحطها." Margin="0,0,0,18"/>
+          <Border Style="{StaticResource Card}">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="من وين؟ (مجلد OBS)" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
+                <TextBlock x:Name="TxtSource" Style="{StaticResource Path}" HorizontalAlignment="Right"/>
+              </StackPanel>
+              <Button x:Name="BtnPickSource" Grid.Column="1" Style="{StaticResource Btn}" Content="تغيير" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+          <Border Style="{StaticResource Card}">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="إلى وين؟ (مثلاً iCloud)" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
+                <TextBlock x:Name="TxtDest" Style="{StaticResource Path}" HorizontalAlignment="Right"/>
+              </StackPanel>
+              <Button x:Name="BtnPickDest" Grid.Column="1" Style="{StaticResource Btn}" Content="تغيير" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+          <Border Style="{StaticResource Card}">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="المقاطع اللي تسمّت، وين تروح؟" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
+                <TextBlock x:Name="TxtNamed" Style="{StaticResource Path}" HorizontalAlignment="Right"/>
+              </StackPanel>
+              <Button x:Name="BtnOpenNamed" Grid.Column="1" Style="{StaticResource Btn}" Content="فتح" VerticalAlignment="Center" Margin="0,0,10,0"/>
+              <Button x:Name="BtnPickNamed" Grid.Column="2" Style="{StaticResource Btn}" Content="تغيير" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="كيف يشتغل؟" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
+              <TextBlock Style="{StaticResource Sub}" Text="• ينقل بس مقاطع OBS (اللي اسمها تاريخ، مثل Replay 2026-09-07 14-57-40)."/>
+              <TextBlock Style="{StaticResource Sub}" Text="• ما يكتب فوق أي ملف. إذا الاسم موجود يضيف رقم مثل (2)."/>
+              <TextBlock Style="{StaticResource Sub}" Text="• ما يلمس المقطع اللي OBS لسا يسجّله."/>
+              <TextBlock Style="{StaticResource Sub}" Text="• إذا شغّلته، يشتغل لحاله عند فتح الجهاز وكل 10 دقايق، حتى لو البرنامج مقفل."/>
+            </StackPanel>
+          </Border>
+          <StackPanel Orientation="Horizontal">
+            <Button x:Name="BtnMoveNow" Style="{StaticResource BlueBtn}" Content="انقل الحين" Margin="0,0,10,0"/>
+            <Button x:Name="BtnOpenDest" Style="{StaticResource Btn}" Content="افتح مجلد الحفظ"/>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- AI -->
+      <ScrollViewer x:Name="PageAi" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource H}" Text="الذكاء الاصطناعي"/>
+          <TextBlock Style="{StaticResource Sub}" Text="البرنامج يشوف صور المقطع ويسمع الفويس، وبعدها Claude يعطيه اسم على اللي صار فيه." Margin="0,0,0,18"/>
+          <Border x:Name="ToolsCard" Style="{StaticResource Card}" Visibility="Collapsed">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="⚠ الأدوات ناقصة" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
+                <TextBlock Style="{StaticResource Sub}" Text="البرنامج يحتاج أدوات تقرأ الفيديو وتسمع الصوت (تقريباً 1.8 جيجا، مرة وحدة بس)."/>
+              </StackPanel>
+              <Button x:Name="BtnSetupTools" Grid.Column="1" Style="{StaticResource BlueBtn}" Content="نزّل الأدوات" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="مين يسمّي المقاطع؟" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,10"/>
+              <RadioButton x:Name="RbLocal" GroupName="Provider" Foreground="White" FontSize="15" Margin="0,0,0,4" VerticalContentAlignment="Center">
+                <TextBlock Text="ذكاء اصطناعي مجاني على جهازك (Ollama)" Margin="8,0,0,0"/>
+              </RadioButton>
+              <TextBlock Style="{StaticResource Sub}" Text="مجاني، وكل شي يصير على جهازك وما يطلع شي للإنترنت. الأسماء أبسط شوي." Margin="26,0,0,12"/>
+              <RadioButton x:Name="RbClaude" GroupName="Provider" Foreground="White" FontSize="15" Margin="0,0,0,4" VerticalContentAlignment="Center">
+                <TextBlock Text="Claude (أدق، بس يحتاج رصيد)" Margin="8,0,0,0"/>
+              </RadioButton>
+              <TextBlock Style="{StaticResource Sub}" Text="أسماء أذكى ويفهم اللهجة والنكت أكثر. تقريباً 5 هللات لكل مقطع." Margin="26,0,0,0"/>
+              <TextBlock x:Name="LocalStatus" Style="{StaticResource Sub}" Margin="0,12,0,0"/>
+            </StackPanel>
+          </Border>
+          <Border x:Name="KeyCard" Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="مفتاح Claude" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
+              <TextBlock Style="{StaticResource Sub}" Text="تسوي حساب في موقع Anthropic، وتشحن فيه رصيد، وتنسخ المفتاح وتلصقه هنا. ينحفظ مشفّر على جهازك بس." Margin="0,0,0,10"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <PasswordBox x:Name="KeyBox" Background="#120809" Foreground="White" BorderBrush="#4A2429" Padding="8,7" FontSize="14" CaretBrush="White" FlowDirection="LeftToRight"/>
+                <Button x:Name="BtnSaveKey" Grid.Column="1" Style="{StaticResource BlueBtn}" Content="حفظ" Margin="10,0,0,0"/>
+                <Button x:Name="BtnGetKey" Grid.Column="2" Style="{StaticResource Btn}" Content="جيب مفتاح" Margin="10,0,0,0"/>
+              </Grid>
+              <TextBlock x:Name="KeyStatus" Style="{StaticResource Sub}" Margin="0,10,0,0"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <CheckBox x:Name="ChkAutoName" Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalContentAlignment="Center">
+                <TextBlock Text="سمّ المقاطع الجديدة تلقائياً بعد ما تنتقل" Margin="8,0,0,0"/>
+              </CheckBox>
+              <TextBlock Style="{StaticResource Sub}" Text="كل مقطع جديد ينقله البرنامج، يسمّيه لحاله بدون ما تسوي شي. يحتاج النقل التلقائي يكون شغّال." Margin="0,8,0,0"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="كيف يشتغل؟" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,6"/>
+              <TextBlock Style="{StaticResource Sub}" Text="• ياخذ 6 صور من المقطع، ويحوّل كلام الفويس لكتابة على جهازك."/>
+              <TextBlock Style="{StaticResource Sub}" Text="• بعدها الذكاء الاصطناعي يشوف الصور والكلام ويعطي اسم."/>
+              <TextBlock Style="{StaticResource Sub}" Text="• مع Claude بس: الصور والكلام المكتوب يطلعون للإنترنت. الصوت نفسه ما يطلع أبداً."/>
+              <TextBlock Style="{StaticResource Sub}" Text="• تسمية المقطع الواحد تاخذ تقريباً نص دقيقة إلى دقيقة."/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- RENAME -->
+      <Grid x:Name="PageRename" Visibility="Collapsed">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel Grid.Row="0">
+          <TextBlock Style="{StaticResource H}" Text="التسمية"/>
+          <TextBlock Style="{StaticResource Sub}" Text="اختر المجلد، وعدّل الاسم الجديد لكل مقطع. ما يتغيّر شي إلا لما تضغط «طبّق الأسماء»." Margin="0,0,0,14"/>
+        </StackPanel>
+        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="18,14">
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel>
+              <TextBlock Text="المجلد" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,4"/>
+              <TextBlock x:Name="TxtRenameFolder" Style="{StaticResource Path}" HorizontalAlignment="Right"/>
+            </StackPanel>
+            <Button x:Name="BtnPickRename" Grid.Column="1" Style="{StaticResource Btn}" Content="تغيير" VerticalAlignment="Center"/>
+          </Grid>
+        </Border>
+        <Border Grid.Row="2" Background="#1E0F11" CornerRadius="6">
+          <Grid>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <ItemsControl x:Name="ClipList" Margin="12">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border BorderBrush="#3A1B1F" BorderThickness="0,0,0,1" Padding="6,10">
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="Auto"/>
+                          <ColumnDefinition Width="260"/>
+                          <ColumnDefinition Width="*"/>
+                          <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Uid="play" Style="{StaticResource Btn}" Content="▶" Tag="{Binding Path}" Padding="12,6" Margin="0,0,12,0" ToolTip="شغّل المقطع"/>
+                        <Button Grid.Column="3" Uid="delete" Style="{StaticResource Btn}" Content="🗑" Tag="{Binding Path}" Padding="12,6" Margin="12,0,0,0" ToolTip="احذف المقطع (يروح لسلة المحذوفات)"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Old}" Foreground="#9E8B8E" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Old}" Margin="0,0,12,0"/>
+                        <TextBox Grid.Column="2" Text="{Binding New, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Background="#120809" Foreground="White" BorderBrush="#4A2429" Padding="8,6" FontSize="14" CaretBrush="White" VerticalContentAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+            <TextBlock x:Name="EmptyList" Text="ما فيه مقاطع في هذا المجلد." Style="{StaticResource Sub}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+          </Grid>
+        </Border>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,14,0,0">
+          <Button x:Name="BtnAiSuggest" Style="{StaticResource BlueBtn}" Content="✨ اقترح أسماء بالذكاء الاصطناعي" Margin="0,0,10,0"/>
+          <Button x:Name="BtnApply" Style="{StaticResource BlueBtn}" Content="طبّق الأسماء" Margin="0,0,10,0"/>
+          <Button x:Name="BtnReload" Style="{StaticResource Btn}" Content="تحديث القائمة" Margin="0,0,14,0"/>
+          <TextBlock x:Name="AiProgress" Style="{StaticResource Sub}" VerticalAlignment="Center"/>
+        </StackPanel>
+      </Grid>
+    </Grid>
+
+    <!-- Sidebar: recent activity -->
+    <Grid Grid.Row="1" Grid.Column="1" Background="#170B0D">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
+      <TextBlock Text="▾  آخر النشاط" FontSize="14" Foreground="#D8C8CA" Margin="20,16,20,10"/>
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <ItemsControl x:Name="ActivityList" Margin="12,0,12,12">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid Margin="8,6">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border Width="34" Height="34" CornerRadius="17" Background="{Binding Color}" Margin="0,0,10,0" VerticalAlignment="Top">
+                  <TextBlock Text="{Binding Icon}" Foreground="White" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel Grid.Column="1">
+                  <TextBlock Text="{Binding Title}" Foreground="#FF6B6B" FontSize="13" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}"/>
+                  <TextBlock Text="{Binding When}" Foreground="#9E8B8E" FontSize="12"/>
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>
+'@
+
+$win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+$ui = @{}
+$xaml.SelectNodes('//*[@*[local-name()="Name"]]') | ForEach-Object {
+    $n = $_.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
+    if ($n) { $ui[$n] = $win.FindName($n) }
+}
+
+function Pick-Folder($current, $title) {
+    $d = New-Object System.Windows.Forms.FolderBrowserDialog
+    $d.Description = $title
+    $d.ShowNewFolderButton = $true
+    if (Test-Path -LiteralPath $current) { $d.SelectedPath = $current }
+    if ($d.ShowDialog() -eq 'OK') { return $d.SelectedPath }
+    $null
+}
+
+function Get-ObsClips($folder) {
+    if (-not (Test-Path -LiteralPath $folder)) { return @() }
+    @(Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue | Where-Object {
+        $VideoExt -contains $_.Extension.ToLower() -and $_.BaseName -match $NamePattern })
+}
+
+function Test-AutoOn { [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) }
+
+function Format-Ago([datetime]$t) {
+    $d = (Get-Date) - $t
+    if ($d.TotalMinutes -lt 1) { 'الحين' }
+    elseif ($d.TotalHours -lt 1) { "قبل $([int]$d.TotalMinutes) دقيقة" }
+    elseif ($d.TotalDays -lt 1) { "قبل $([int]$d.TotalHours) ساعة" }
+    else { "قبل $([int]$d.TotalDays) يوم" }
+}
+
+function Refresh-Activity {
+    $items = New-Object System.Collections.ArrayList
+    if (Test-Path -LiteralPath $LogFile) {
+        $lines = Get-Content -LiteralPath $LogFile -Tail 40 -Encoding UTF8
+        [array]::Reverse($lines)
+        foreach ($l in $lines) {
+            if ($l -notmatch '^(\S+ \S+)\s+(.*)$') { continue }
+            $when = Format-Ago ([datetime]$Matches[1]); $msg = $Matches[2]
+            if ($msg -match '^Moved: (.+?) -> ') { $o = @{ Icon = '⇪'; Color = '#A3121F'; Title = "انتقل: $($Matches[1])" } }
+            elseif ($msg -match '^Renamed: .+? -> (.+)$') { $o = @{ Icon = '✎'; Color = '#6B1520'; Title = "تسمّى: $($Matches[1])" } }
+            elseif ($msg -match '^Deleted \(.+?\): (.+)$') { $o = @{ Icon = '🗑'; Color = '#4A2429'; Title = "انحذف: $($Matches[1])" } }
+            elseif ($msg -match '^AI suggested: .+? -> (.+)$') { $o = @{ Icon = '✨'; Color = '#6B1520'; Title = "اقتراح: $($Matches[1])" } }
+            elseif ($msg -match '^AI FAILED: (.+?): ') { $o = @{ Icon = '!'; Color = '#D9534F'; Title = "ما قدر يسمّي: $($Matches[1])" } }
+            elseif ($msg -match '^Skipped \(in use\): (.+)$') { $o = @{ Icon = '●'; Color = '#E0A030'; Title = "ينتظر (يتسجّل): $($Matches[1])" } }
+            else { $o = @{ Icon = '!'; Color = '#D9534F'; Title = $msg } }
+            $o.When = $when
+            [void]$items.Add([pscustomobject]$o)
+        }
+    }
+    if ($items.Count -eq 0) { [void]$items.Add([pscustomobject]@{ Icon = '·'; Color = '#3A1B1F'; Title = 'ما فيه نشاط للحين'; When = '' }) }
+    $ui.ActivityList.ItemsSource = $items
+}
+
+function Refresh-Status {
+    $on = Test-AutoOn
+    $ui.StatusBig.Text = if ($on) { 'شغّال' } else { 'موقف' }
+    $ui.SideStatus.Text = if ($on) { 'النقل التلقائي شغّال' } else { 'النقل التلقائي موقف' }
+    $ui.BtnPlay.Content = if ($on) { 'إيقاف' } else { 'تشغيل' }
+    $ui.BtnPlay.Background = if ($on) { [Windows.Media.BrushConverter]::new().ConvertFrom('#4A2429') } else { [Windows.Media.BrushConverter]::new().ConvertFrom('#A3121F') }
+    $ui.CountWaiting.Text = (Get-ObsClips $Settings.Source).Count
+    $ui.CountDest.Text = if (Test-Path -LiteralPath $Settings.Dest) { @(Get-ChildItem -LiteralPath $Settings.Dest -File -ErrorAction SilentlyContinue | Where-Object { $VideoExt -contains $_.Extension.ToLower() }).Count } else { 0 }
+    $ui.HomeHint.Text = "من: $($Settings.Source)`nإلى: $($Settings.Dest)"
+    $ui.TxtSource.Text = $Settings.Source
+    $ui.TxtDest.Text = $Settings.Dest
+    $ui.TxtRenameFolder.Text = $Settings.RenameFolder
+    $ui.TxtNamed.Text = $Settings.NamedFolder
+    $ui.ToolsCard.Visibility = if (Test-Tools) { 'Collapsed' } else { 'Visible' }
+    $ui.KeyStatus.Text = if ($Settings.ApiKey) { '✓ فيه مفتاح محفوظ. تقدر تلصق مفتاح جديد وتضغط «حفظ» لو تبي تغيّره.' } else { 'ما فيه مفتاح محفوظ للحين.' }
+    Refresh-Activity
+    Update-AiProgress
+}
+
+function Test-Tools {
+    $t = Join-Path $Root 'tools'
+    (Test-Path (Join-Path $t 'ffmpeg.exe')) -and (Test-Path (Join-Path $t 'ffprobe.exe')) -and
+    (Test-Path (Join-Path $t 'whisper\whisper-cli.exe')) -and (Test-Path (Join-Path $t 'whisper\ggml-large-v3-turbo.bin'))
+}
+
+$AiStatusFile = Join-Path $Root 'ai-status.txt'
+$script:AiRunning = $false
+function Update-AiProgress {
+    if (-not $script:AiRunning) { return }
+    $st = if (Test-Path -LiteralPath $AiStatusFile) { (Get-Content -LiteralPath $AiStatusFile -Raw -Encoding UTF8).Trim() } else { '' }
+    if ($st -match '^run:(\d+)/(\d+)') {
+        $ui.AiProgress.Text = "✨ يسمّي... مقطع $($Matches[1]) من $($Matches[2])"
+        Load-Suggestions
+    } elseif ($st -match '^done:(\d+)') {
+        $script:AiRunning = $false; $ui.BtnAiSuggest.IsEnabled = $true
+        $ui.AiProgress.Text = "✓ خلص. اقترح $($Matches[1]) اسم، راجعها واضغط «طبّق الأسماء»."
+        Load-Suggestions
+    } elseif ($st -match '^error:(\w+)') {
+        $script:AiRunning = $false; $ui.BtnAiSuggest.IsEnabled = $true
+        $ui.AiProgress.Text = switch ($Matches[1]) { 'ollama' { '⚠ برنامج Ollama مو شغّال أو مو مثبّت.' } 'key' { '⚠ ما فيه مفتاح. روح لصفحة «الذكاء الاصطناعي».' } 'tools' { '⚠ الأدوات ناقصة. روح لصفحة «الذكاء الاصطناعي».' } default { '⚠ صار خطأ، شوف آخر النشاط.' } }
+    }
+}
+
+# Fill in new suggestions without losing names the user already typed
+function Load-Suggestions {
+    $csv = Join-Path $Root 'names.csv'
+    if (-not (Test-Path -LiteralPath $csv) -or -not $ui.ClipList.ItemsSource) { return }
+    $suggest = @{}
+    Get-Content -LiteralPath $csv -Encoding UTF8 | ConvertFrom-Csv | ForEach-Object { $suggest[$_.Old] = $_.New }
+    $changed = $false
+    foreach ($r in $ui.ClipList.ItemsSource) {
+        if ($r.New -eq $r.Old -and $suggest.ContainsKey($r.Old) -and $suggest[$r.Old] -ne $r.New) { $r.New = $suggest[$r.Old]; $changed = $true }
+    }
+    if ($changed) { $ui.ClipList.Items.Refresh() }
+}
+
+function Load-RenameList {
+    $folder = $Settings.RenameFolder
+    $suggest = @{}
+    $csv = Join-Path $Root 'names.csv'
+    if (Test-Path -LiteralPath $csv) {
+        Get-Content -LiteralPath $csv -Encoding UTF8 | ConvertFrom-Csv | ForEach-Object { $suggest[$_.Old] = $_.New }
+    }
+    $rows = New-Object System.Collections.ObjectModel.ObservableCollection[TozClipRow]
+    if (Test-Path -LiteralPath $folder) {
+        Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue |
+            Where-Object { $VideoExt -contains $_.Extension.ToLower() } | Sort-Object Name | ForEach-Object {
+                $r = New-Object TozClipRow
+                $r.Old = $_.Name; $r.Path = $_.FullName
+                $r.New = if ($suggest.ContainsKey($_.Name)) { $suggest[$_.Name] } else { $_.Name }
+                $rows.Add($r)
+            }
+    }
+    $ui.ClipList.ItemsSource = $rows
+    $ui.EmptyList.Visibility = if ($rows.Count) { 'Collapsed' } else { 'Visible' }
+}
+
+function Write-Log($msg) {
+    Add-Content -LiteralPath $LogFile -Value ("{0:yyyy-MM-dd HH:mm:ss}  {1}" -f (Get-Date), $msg) -Encoding UTF8
+}
+
+function Show-Page($name) {
+    foreach ($p in 'PageHome', 'PageMove', 'PageRename', 'PageAi') { $ui[$p].Visibility = 'Collapsed' }
+    $ui[$name].Visibility = 'Visible'
+    if ($name -eq 'PageRename') { Load-RenameList }
+}
+
+$ui.UserName.Text = $env:USERNAME
+$ui.UserInitials.Text = $env:USERNAME.Substring(0, [Math]::Min(3, $env:USERNAME.Length))
+
+# --- Events ---
+$ui.TopBar.Add_MouseLeftButtonDown({ $win.DragMove() })
+$ui.BtnMin.Add_Click({ $win.WindowState = 'Minimized' })
+$ui.BtnClose.Add_Click({ $win.Close() })
+$ui.NavHome.Add_Checked({ Show-Page 'PageHome' })
+$ui.NavMove.Add_Checked({ Show-Page 'PageMove' })
+$ui.NavRename.Add_Checked({ Show-Page 'PageRename' })
+$ui.NavAi.Add_Checked({ Show-Page 'PageAi' })
+
+function Update-ProviderUi {
+    $isClaude = $Settings.Provider -eq 'claude'
+    $ui.KeyCard.Visibility = if ($isClaude) { 'Visible' } else { 'Collapsed' }
+    if ($isClaude) { $ui.LocalStatus.Text = ''; return }
+    $exe = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
+    $ui.LocalStatus.Text = if (-not (Test-Path $exe)) { '⚠ برنامج Ollama مو مثبّت. نزّله من ollama.com' }
+        elseif (Test-Path (Join-Path $env:USERPROFILE ".ollama\models\manifests\registry.ollama.ai\library\$($Settings.LocalModel -replace ':', '\')")) { "✓ الذكاء المجاني جاهز ($($Settings.LocalModel))." }
+        else { "⚠ النموذج $($Settings.LocalModel) مو منزّل. شغّل: ollama pull $($Settings.LocalModel)" }
+}
+$ui.RbLocal.IsChecked = $Settings.Provider -ne 'claude'
+$ui.RbClaude.IsChecked = $Settings.Provider -eq 'claude'
+$ui.RbLocal.Add_Click({ $Settings.Provider = 'local'; Save-Settings $Settings; Update-ProviderUi })
+$ui.RbClaude.Add_Click({ $Settings.Provider = 'claude'; Save-Settings $Settings; Update-ProviderUi })
+Update-ProviderUi
+
+$ui.ChkAutoName.IsChecked = [bool]$Settings.AutoName
+$ui.ChkAutoName.Add_Click({ $Settings.AutoName = [bool]$ui.ChkAutoName.IsChecked; Save-Settings $Settings })
+
+$ui.BtnGetKey.Add_Click({ Start-Process 'https://console.anthropic.com/settings/keys' })
+
+$ui.BtnSaveKey.Add_Click({
+    $key = $ui.KeyBox.Password.Trim()
+    if (-not $key) { $ui.KeyStatus.Text = 'الصق المفتاح في الخانة أول.'; return }
+    $ui.KeyStatus.Text = 'أتأكد من المفتاح...'
+    $ok = $false
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-RestMethod 'https://api.anthropic.com/v1/models?limit=1' -Headers @{ 'x-api-key' = $key; 'anthropic-version' = '2026-10-21' } -TimeoutSec 20 | Out-Null
+        $ok = $true
+    } catch { }
+    if (-not $ok) { $ui.KeyStatus.Text = '✗ المفتاح غلط أو ما فيه إنترنت. انسخه مرة ثانية من موقع Anthropic.'; return }
+    $Settings.ApiKey = ConvertTo-SecureString $key -AsPlainText -Force | ConvertFrom-SecureString
+    Save-Settings $Settings
+    $ui.KeyBox.Clear()
+    Refresh-Status
+    $ui.KeyStatus.Text = '✓ المفتاح صحيح وانحفظ.'
+})
+
+$ui.BtnSetupTools.Add_Click({
+    Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $Root 'Setup-Tools.ps1')`""
+})
+
+$ui.BtnAiSuggest.Add_Click({
+    if ($Settings.Provider -eq 'claude' -and -not $Settings.ApiKey) { $ui.AiProgress.Text = '⚠ ما فيه مفتاح. روح لصفحة «الذكاء الاصطناعي».'; return }
+    if (-not (Test-Tools)) { $ui.AiProgress.Text = '⚠ الأدوات ناقصة. روح لصفحة «الذكاء الاصطناعي».'; return }
+    Save-Settings $Settings
+    Set-Content -LiteralPath $AiStatusFile -Value 'run:0/0' -Encoding UTF8
+    $script:AiRunning = $true; $ui.BtnAiSuggest.IsEnabled = $false
+    $ui.AiProgress.Text = '✨ يبدأ...'
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $Root 'Name-Clips.ps1')`"", '-Folder', "`"$($Settings.RenameFolder)`"", '-Mode', 'Suggest'
+})
+$ui.BtnGear.Add_Click({ $ui.NavMove.IsChecked = $true })
+
+$ui.BtnPlay.Add_Click({
+    if (Test-AutoOn) {
+        & (Join-Path $Root 'Uninstall.ps1') | Out-Null
+    } else {
+        Save-Settings $Settings
+        & (Join-Path $Root 'Install.ps1') | Out-Null
+    }
+    Refresh-Status
+})
+
+$ui.BtnPickSource.Add_Click({
+    $p = Pick-Folder $Settings.Source 'اختر المجلد اللي يحفظ فيه OBS المقاطع'
+    if ($p) { $Settings.Source = $p; Save-Settings $Settings; Refresh-Status }
+})
+$ui.BtnPickDest.Add_Click({
+    $p = Pick-Folder $Settings.Dest 'اختر المجلد اللي تبي المقاطع تنتقل له'
+    if ($p) { $Settings.Dest = $p; Save-Settings $Settings; Refresh-Status }
+})
+$ui.BtnPickNamed.Add_Click({
+    $p = Pick-Folder $Settings.NamedFolder 'اختر المجلد اللي تروح له المقاطع بعد ما تتسمّى'
+    if ($p) { $Settings.NamedFolder = $p; Save-Settings $Settings; Refresh-Status }
+})
+$ui.BtnOpenNamed.Add_Click({
+    if (-not (Test-Path -LiteralPath $Settings.NamedFolder)) { New-Item -ItemType Directory -Path $Settings.NamedFolder -Force | Out-Null }
+    Start-Process explorer.exe -ArgumentList "`"$($Settings.NamedFolder)`""
+})
+$ui.BtnPickRename.Add_Click({
+    $p = Pick-Folder $Settings.RenameFolder 'اختر المجلد اللي تبي تسمّي مقاطعه'
+    if ($p) { $Settings.RenameFolder = $p; Save-Settings $Settings; Refresh-Status; Load-RenameList }
+})
+
+$ui.BtnMoveNow.Add_Click({
+    Save-Settings $Settings
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $Root 'Move-Clips.ps1')`""
+})
+$ui.BtnOpenDest.Add_Click({ if (Test-Path -LiteralPath $Settings.Dest) { Start-Process explorer.exe -ArgumentList "`"$($Settings.Dest)`"" } })
+$ui.BtnReload.Add_Click({ Load-RenameList })
+
+# Play and delete buttons inside the clip list
+Add-Type -AssemblyName Microsoft.VisualBasic
+$ui.ClipList.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, [Windows.RoutedEventHandler]{
+    param($s, $e)
+    $btn = $e.OriginalSource
+    $path = $btn.Tag
+    if (-not $path -or -not (Test-Path -LiteralPath $path)) { return }
+    if ($btn.Uid -eq 'play') { Start-Process -FilePath $path; return }
+    if ($btn.Uid -eq 'delete') {
+        $name = Split-Path $path -Leaf
+        $inICloud = $path -like "$env:USERPROFILE\iCloudDrive\*"
+        $where = if ($inICloud) { 'بيروح لـ «المحذوفات مؤخراً» في iCloud (موقع icloud.com)، ويبقى هناك 30 يوم تقدر ترجّعه فيها.' } else { 'بيروح لسلة المحذوفات، وتقدر ترجّعه منها.' }
+        $answer = [Windows.MessageBox]::Show($win, "تبي تحذف هذا المقطع؟`n`n$name`n`n$where", 'ClipRenamer', 'YesNo', 'Warning')
+        if ($answer -ne 'Yes') { return }
+        try {
+            if ($inICloud) {
+                # iCloud refuses the Windows Recycle Bin (error 0x8007017B); it keeps deleted files in Recently Deleted instead
+                Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+                Write-Log "Deleted (iCloud recently deleted): $name"
+            } else {
+                [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($path, 'OnlyErrorDialogs', 'SendToRecycleBin')
+                Write-Log "Deleted (recycle bin): $name"
+            }
+        } catch { Write-Log "FAILED delete: ${name}: $($_.Exception.Message)" }
+        Load-RenameList; Refresh-Activity
+    }
+})
+
+$ui.BtnApply.Add_Click({
+    $bad = [IO.Path]::GetInvalidFileNameChars()
+    $done = 0; $skipped = 0
+    foreach ($r in @($ui.ClipList.ItemsSource)) {
+        $new = $r.New.Trim()
+        if (-not $new -or $new -eq $r.Old) { continue }
+        if ($new.IndexOfAny($bad) -ge 0) { $skipped++; Write-Log "Bad name (skipped): $new"; continue }
+        if ([IO.Path]::GetExtension($new) -eq '') { $new += [IO.Path]::GetExtension($r.Old) }
+        # Named clips go to their own folder so they don't mix with the unnamed ones
+        if (-not (Test-Path -LiteralPath $Settings.NamedFolder)) { New-Item -ItemType Directory -Path $Settings.NamedFolder -Force | Out-Null }
+        $target = Join-Path $Settings.NamedFolder $new
+        if (Test-Path -LiteralPath $target) { $skipped++; Write-Log "Name taken (skipped): $new"; continue }
+        try { Move-Item -LiteralPath $r.Path -Destination $target -ErrorAction Stop; $done++; Write-Log "Renamed: $($r.Old) -> $new" }
+        catch { $skipped++; Write-Log "FAILED: $($r.Old): $($_.Exception.Message)" }
+    }
+    Load-RenameList; Refresh-Activity
+    $msg = "تغيّر اسم $done مقطع، وانتقلوا لمجلد «$(Split-Path $Settings.NamedFolder -Leaf)»."
+    if ($skipped) { $msg += "`nوتخطّيت $skipped (الاسم موجود أو فيه رموز ممنوعة)." }
+    [Windows.MessageBox]::Show($win, $msg, 'ClipRenamer') | Out-Null
+})
+
+# Keep numbers and activity fresh
+$timer = New-Object Windows.Threading.DispatcherTimer
+$timer.Interval = [TimeSpan]::FromSeconds(5)
+$timer.Add_Tick({ Refresh-Status })
+$timer.Start()
+
+Refresh-Status
+[void]$win.ShowDialog()
