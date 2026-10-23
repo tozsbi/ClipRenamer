@@ -25,6 +25,7 @@ A Windows app that organizes your OBS clips for you:
 | 🎙️ Understands voice chat | Turns speech into text on your PC with whisper |
 | 📁 Your folders | Choose where clips come from, where they go, and where named clips go |
 | 🗑️ Delete | To the Recycle Bin, or to iCloud's "Recently Deleted" |
+| 🌐 Two languages | App in English or Arabic, clip names in English or Arabic |
 
 ## Getting started
 
@@ -51,9 +52,10 @@ A Windows app that organizes your OBS clips for you:
 - Speech is turned into text **on your PC**; the audio itself never leaves it.
 - With Claude only: 6 frames from the clip and the speech text are sent to Claude. With Ollama, nothing leaves your PC.
 
-## Note
+## Languages
 
-The app's interface is in Arabic.
+- The app comes in **English and Arabic**. Switch any time with the 🌐 button at the top.
+- Clip names can be written in **English** or **Arabic (Saudi dialect)**. Choose on the **AI** page.
 
 ## License
 

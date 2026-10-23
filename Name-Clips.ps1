@@ -36,7 +36,7 @@ $cfg = if (Test-Path -LiteralPath $SettingsFile) { Get-Content -LiteralPath $Set
 $Provider = if ($cfg.Provider) { $cfg.Provider } else { 'local' }
 $LocalModel = if ($cfg.LocalModel) { $cfg.LocalModel } else { 'qwen3-vl:8b-instruct' }
 $OllamaUrl = 'http://localhost:11434'
-$NamedFolder = if ($cfg.NamedFolder) { $cfg.NamedFolder } else { Join-Path $env:USERPROFILE 'iCloudDrive\المقاطع المسمّاة' }
+$NamedFolder = if ($cfg.NamedFolder) { $cfg.NamedFolder } else { Join-Path $env:USERPROFILE 'iCloudDrive\Named Clips' }
 
 if ($Provider -eq 'claude') {
     if (-not $cfg.ApiKey) { Write-Log 'AI: no API key saved.'; Set-Status 'error:key'; exit 1 }
@@ -78,24 +78,40 @@ if (-not $mutex.WaitOne(0)) { Write-Log 'AI: another naming run is already worki
 $work = Join-Path $env:TEMP "ClipRenamer\$PID"
 New-Item -ItemType Directory $work -Force | Out-Null
 
-$system = @'
-You name short gameplay clips recorded with OBS for a Saudi gamer and their friends.
-You get one image (6 frames from the clip, left to right, top to bottom) and a speech transcript of the voice chat.
-Reply with ONLY the clip name, nothing else:
-- Saudi Arabic dialect, 3 to 9 words, like a friend would label the clip.
-- Start with the game or app name in Arabic, then " - ", then what happened.
-- Prefer the funny or memorable moment from the voice chat (a joke, someone yelling, weird sounds, an argument) over what is on screen.
-- Use a player's name only if it is clearly said or clearly shown as the speaker; otherwise say "واحد" or "الشباب".
-- The transcript is machine-made and noisy. Lines like "اشتركوا في القناة", "ترجمة نانسي قنقر", "موسيقى" or repeated filler are recognition errors, not real speech: ignore them.
-- No quotes, no emoji, no file extension, no date, and none of these characters: \ / : * ? " < > |
+# Clip names can be English (default) or Arabic in Saudi dialect
+$Arabic = $cfg.NameLanguage -eq 'Arabic'
+$LangName = if ($Arabic) { 'Saudi Arabic dialect' } else { 'English' }
+$styleLines = if ($Arabic) { @'
+- Use "واحد" or "الشباب" when you don't know who did something.
 Examples of the style (the game part is just a placeholder):
 اللعبة - هوشة مين المحور
-اللعبة - واحد يصرخ والباقي يضحكون
 اللعبة - تقليد صوت زورو
-'@
+Describe what really happens in THIS clip; never copy these examples.
+'@ } else { @'
+- Use "someone" or "the squad" when you don't know who did something.
+- The voice chat may be in any language; always write the name in English.
+Examples of the style (the game part is just a placeholder):
+Game - argument about who the main tank is
+Game - Zoro voice impression
+Describe what really happens in THIS clip; never copy these examples.
+'@ }
 
-# Games this player plays, with the Arabic name used in file names.
+$system = @"
+You name short gameplay clips recorded with OBS for a gamer and their friends.
+You get one image (6 frames from the clip, left to right, top to bottom) and a speech transcript of the voice chat.
+Reply with ONLY the clip name, nothing else:
+- $LangName, 3 to 9 words, like a friend would label the clip.
+- Start with the game or app name, then " - ", then what happened.
+- Prefer the funny or memorable moment from the voice chat (a joke, someone yelling, weird sounds, an argument) over what is on screen.
+- Use a player's name only if it is clearly said or clearly shown as the speaker.
+- The transcript is machine-made and noisy. Lines like "اشتركوا في القناة", "ترجمة نانسي قنقر", "موسيقى" or repeated filler are recognition errors, not real speech: ignore them.
+- No quotes, no emoji, no file extension, no date, and none of these characters: \ / : * ? " < > |
+$styleLines
+"@
+
+# Games to recognize, with the name used in file names (Arabic names when naming in Arabic).
 # Small local models guess the game badly from free text, so they first pick from this list.
+$GamesEnglish = @{ 'Discord call or screen share' = 'Discord'; 'Anime or TV show' = 'Anime'; 'Web browser' = 'Browser'; 'Other' = '' }
 $Games = [ordered]@{
     'Overwatch'                    = 'أوفرواتش'
     'Deadlock'                     = 'ديدلوك'
@@ -149,10 +165,27 @@ function Invoke-Claude([string]$imageB64, [string]$transcript) {
     ($json.content | Where-Object type -eq 'text' | ForEach-Object text) -join ' '
 }
 
+function Start-Ollama {
+    try { Invoke-RestMethod "$OllamaUrl/api/version" -TimeoutSec 5 | Out-Null; return $true } catch { }
+    $exe = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
+    if (-not (Test-Path $exe)) { return $false }
+    Start-Process $exe -ArgumentList 'serve' -WindowStyle Hidden
+    foreach ($i in 1..20) { Start-Sleep 1; try { Invoke-RestMethod "$OllamaUrl/api/version" -TimeoutSec 3 | Out-Null; return $true } catch { } }
+    $false
+}
+
 function Send-Ollama([hashtable]$body) {
-    $req = New-Object System.Net.Http.HttpRequestMessage 'Post', "$OllamaUrl/api/chat"
-    $req.Content = New-Object System.Net.Http.StringContent(($body | ConvertTo-Json -Depth 10), [Text.Encoding]::UTF8, 'application/json')
-    $res = $http.SendAsync($req).GetAwaiter().GetResult()
+    $json = $body | ConvertTo-Json -Depth 10
+    $res = $null
+    foreach ($try in 1, 2) {
+        $req = New-Object System.Net.Http.HttpRequestMessage 'Post', "$OllamaUrl/api/chat"
+        $req.Content = New-Object System.Net.Http.StringContent($json, [Text.Encoding]::UTF8, 'application/json')
+        try { $res = $http.SendAsync($req).GetAwaiter().GetResult(); break }
+        catch {
+            # Ollama stopped in the middle of a run: start it again and retry once
+            if ($try -eq 2 -or -not (Start-Ollama)) { throw 'local AI (Ollama) is not running' }
+        }
+    }
     $bytes = $res.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
     $json = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
     if (-not $res.IsSuccessStatusCode) {
@@ -173,12 +206,15 @@ function Get-LocalGame([string]$imageB64) {
         format   = @{ type = 'object'; properties = @{ app = @{ type = 'string'; enum = $options } }; required = @('app') }
         messages = @(@{ role = 'user'; content = "These are 6 frames from one screen recording. Which ONE of these is on screen? $GameHints Options: $($options -join ', ')"; images = @($imageB64) })
     }
-    try { $Games[($answer | ConvertFrom-Json).app] } catch { '' }
+    try {
+        $app = [string]($answer | ConvertFrom-Json).app
+        if ($Arabic) { $Games[$app] } elseif ($GamesEnglish.ContainsKey($app)) { $GamesEnglish[$app] } else { $app }
+    } catch { '' }
 }
 
 # Step 2 (local AI): describe what happened, with the game already decided
 function Invoke-Local([string]$imageB64, [string]$transcript, [string]$game, [double]$temperature) {
-    $gameLine = if ($game) { "The clip is from: $game. Start the name with exactly `"$game - `"." } else { 'Start with the game or app name in Arabic.' }
+    $gameLine = if ($game) { "The clip is from: $game. Start the name with exactly `"$game - `"." } else { 'Start with the game or app name.' }
     $body = @{
         model    = $LocalModel
         stream   = $false
@@ -186,7 +222,7 @@ function Invoke-Local([string]$imageB64, [string]$transcript, [string]$game, [do
         options  = @{ temperature = $temperature; num_predict = 200; repeat_penalty = 1.1 }
         messages = @(
             @{ role = 'system'; content = $system },
-            @{ role = 'user'; content = "$gameLine`nVoice chat transcript:`n$transcript`n`nReply with the clip name only, in Saudi Arabic."; images = @($imageB64) }
+            @{ role = 'user'; content = "$gameLine`nVoice chat transcript:`n$transcript`n`nReply with the clip name only, in $LangName."; images = @($imageB64) }
         )
     }
     $name = Send-Ollama $body
@@ -255,7 +291,7 @@ foreach ($f in $Files) {
     } catch {
         Write-Log "AI FAILED: ${old}: $($_.Exception.Message)"
         # Stop only when no clip can succeed (bad key, no credit, model missing, Ollama down)
-        if ($_.Exception.Message -match '401|credit|not downloaded|actively refused|No connection') { break }
+        if ($_.Exception.Message -match '401|credit|not downloaded|Ollama\) is not running') { break }
         continue
     }
     if ($Mode -eq 'Suggest') {
