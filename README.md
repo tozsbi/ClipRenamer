@@ -6,6 +6,14 @@
 > AI naming **works well if you have a Claude API key**.
 > The free on-device AI gets the game right, but its descriptions of what happened in the clip are **not the best yet**.
 
+## The idea
+
+The main idea is for AI to **name each clip** after what actually happened in it, so you never have to dig through files called `Replay 2026-09-07 14-57-40.mp4` again.
+
+Right now the AI doesn't handle every clip well. It struggles with **long clips**, and with voice chat in **dialects** rather than standard (formal) language, such as Saudi Arabic. So some names come out vague or wrong.
+
+I hope that in the future the idea gets better, and the way it's built improves with it.
+
 A Windows app that organizes your OBS clips for you:
 
 - **Moves clips automatically** from your OBS folder to any folder you choose, such as iCloud Drive, so they upload to the cloud.
